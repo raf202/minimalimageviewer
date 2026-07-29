@@ -173,10 +173,18 @@ int ViewerApp::Run(HINSTANCE hInstance, int nCmdShow, LPWSTR lpCmdLine) {
 
     if (lpCmdLine && *lpCmdLine) {
         std::wstring filePath(lpCmdLine);
+        // Trim surrounding whitespace before unquoting: some launchers leave a
+        // trailing space after the closing quote, which broke the quote check.
+        const wchar_t* whitespace = L" \t\r\n";
+        size_t first = filePath.find_first_not_of(whitespace);
+        size_t last = filePath.find_last_not_of(whitespace);
+        filePath = (first == std::wstring::npos) ? L"" : filePath.substr(first, last - first + 1);
         if (filePath.length() >= 2 && filePath.front() == L'"' && filePath.back() == L'"') {
             filePath = filePath.substr(1, filePath.length() - 2);
         }
-        LoadImageFromFile(filePath);
+        if (!filePath.empty()) {
+            LoadImageFromFile(filePath);
+        }
     }
 
     InvalidateRect(m_ctx.hWnd, nullptr, FALSE);

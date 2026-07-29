@@ -31,6 +31,19 @@
 
 
 
+# About this fork
+
+This is a personal fork of [deminimis/minimalimageviewer](https://github.com/deminimis/minimalimageviewer) whose main change is proper SVG rendering. The upstream app renders SVGs with Direct2D's `DrawSvgDocument`, which supports only a small subset of SVG (no CSS `<style>` blocks, no `<text>`, no filters) and was also given a hardcoded 1000x1000 viewport that cropped larger documents.
+
+Changes in this fork:
+
+* SVGs are rendered by [resvg](https://github.com/linebender/resvg) (statically linked, MPL-2.0), giving full support for CSS-styled files, text elements, and filters. Files are rasterized at high resolution and flow through the normal image pipeline, so zoom, rotate, crop, and copy all work.
+* The Direct2D SVG path remains as an automatic fallback, with its viewport now derived from the document's intrinsic size instead of the hardcoded 1000x1000.
+* Fixed command-line file paths not loading when quoted with trailing whitespace.
+* Build fixes: the WIL NuGet targets file is included, and `third_party/resvg/` carries the prebuilt resvg static library plus header so no Rust toolchain is needed to build. To regenerate it, clone resvg into `third_party/resvg-src` and run `cargo build --release -p resvg-capi` with `RUSTFLAGS=-C target-feature=+crt-static`, then copy `resvg.h` and `target/release/resvg.lib` into `third_party/resvg/`.
+
+License is unchanged (GPL-3.0). resvg is used unmodified under MPL-2.0.
+
 # Download
 
 ### Recommended: Install the latest signed version from the Microsoft Store:

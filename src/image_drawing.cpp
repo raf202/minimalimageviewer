@@ -4,12 +4,51 @@
 
 
 
+// Determines an SVG's intrinsic pixel size the same way browsers do:
+// explicit absolute width/height attributes win, then the viewBox dimensions
+// (keeping aspect ratio if only one absolute dimension is present), then a
+// fallback default. Percentage lengths carry no intrinsic size and are ignored.
+static D2D1_SIZE_F GetSvgIntrinsicSize(ID2D1SvgDocument* svgDocument) {
+    constexpr D2D1_SIZE_F kFallbackSize = { 512.0f, 512.0f };
+    ComPtr<ID2D1SvgElement> root;
+    svgDocument->GetRoot(&root);
+    if (!root) return kFallbackSize;
+
+    D2D1_SVG_LENGTH width = {};
+    D2D1_SVG_LENGTH height = {};
+    bool hasWidth = root->IsAttributeSpecified(L"width") &&
+        SUCCEEDED(root->GetAttributeValue(L"width", &width)) &&
+        width.units == D2D1_SVG_LENGTH_UNITS_NUMBER && width.value > 0.0f;
+    bool hasHeight = root->IsAttributeSpecified(L"height") &&
+        SUCCEEDED(root->GetAttributeValue(L"height", &height)) &&
+        height.units == D2D1_SVG_LENGTH_UNITS_NUMBER && height.value > 0.0f;
+
+    if (hasWidth && hasHeight) {
+        return D2D1::SizeF(width.value, height.value);
+    }
+
+    D2D1_SVG_VIEWBOX viewBox = {};
+    bool hasViewBox = root->IsAttributeSpecified(L"viewBox") &&
+        SUCCEEDED(root->GetAttributeValue(L"viewBox",
+            D2D1_SVG_ATTRIBUTE_POD_TYPE_VIEWBOX, &viewBox, sizeof(viewBox))) &&
+        viewBox.width > 0.0f && viewBox.height > 0.0f;
+
+    if (hasViewBox) {
+        if (hasWidth)  return D2D1::SizeF(width.value, width.value * viewBox.height / viewBox.width);
+        if (hasHeight) return D2D1::SizeF(height.value * viewBox.width / viewBox.height, height.value);
+        return D2D1::SizeF(viewBox.width, viewBox.height);
+    }
+    if (hasWidth)  return D2D1::SizeF(width.value, width.value);
+    if (hasHeight) return D2D1::SizeF(height.value, height.value);
+    return kFallbackSize;
+}
+
 bool ViewerApp::GetCurrentImageSize(UINT* width, UINT* height) {
    std::lock_guard<std::recursive_mutex> lock(m_ctx.wicMutex);
     if (m_ctx.isSvg && m_ctx.svgDocument) {
         D2D1_SIZE_F size = m_ctx.svgDocument->GetViewportSize();
-        *width = static_cast<UINT>(size.width);
-        *height = static_cast<UINT>(size.height);
+        *width = std::max(1U, static_cast<UINT>(std::lround(size.width)));
+        *height = std::max(1U, static_cast<UINT>(std::lround(size.height)));
         return true;
     }
     else if (m_ctx.isAnimated) {
@@ -100,7 +139,13 @@ void ViewerApp::CreateDeviceResources() {
         if (SUCCEEDED(m_ctx.renderTarget->QueryInterface(IID_PPV_ARGS(&dc5)))) {
             ComPtr<IStream> stream = SHCreateMemStream(m_ctx.svgData.data(), static_cast<UINT>(m_ctx.svgData.size()));
             if (stream) {
-                dc5->CreateSvgDocument(stream.Get(), D2D1::SizeF(1000.0f, 1000.0f), &m_ctx.svgDocument);
+                // The viewport must match the document's intrinsic size: Direct2D
+                // clips SVG content to the viewport, so a fixed size crops large
+                // documents and shrinks small ones into a corner. The size passed
+                // here is a placeholder until the document is parsed below.
+                if (SUCCEEDED(dc5->CreateSvgDocument(stream.Get(), D2D1::SizeF(512.0f, 512.0f), &m_ctx.svgDocument)) && m_ctx.svgDocument) {
+                    m_ctx.svgDocument->SetViewportSize(GetSvgIntrinsicSize(m_ctx.svgDocument.Get()));
+                }
             }
         }
     }

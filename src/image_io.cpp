@@ -21,6 +21,9 @@
 
 #pragma warning(pop)
 
+// resvg (Rust, static lib) renders SVGs with full CSS/text/filter support,
+// far beyond the Direct2D SVG subset. See third_party/resvg.
+#include "resvg.h"
 
 
 static bool IsImageFile(const wchar_t* filePath) {
@@ -57,6 +60,90 @@ HRESULT ViewerApp::CreateDecoderFromStream_FullFileRead(
 
 HRESULT ViewerApp::CreateDecoderFromFile(const wchar_t* filePath, IWICBitmapDecoder** ppDecoder) {
     return CreateDecoderFromStream_FullFileRead(m_ctx.wicFactory.Get(), filePath, ppDecoder, -1);
+}
+
+// Rasterizes SVG data with resvg into a WIC bitmap and stages it through the
+// normal static-image pipeline (so zoom, rotate, crop and copy all work).
+// Returns false on any failure so the caller can fall back to Direct2D SVG.
+// Runs on a background thread; COM must already be initialized on it.
+bool ViewerApp::LoadSvgWithResvg(FastByteBuffer& rawData, int seqId) {
+    resvg_options* options = resvg_options_create();
+    if (!options) return false;
+    resvg_options_load_system_fonts(options); // Required for <text> elements
+
+    resvg_render_tree* tree = nullptr;
+    int32_t parseResult = resvg_parse_tree_from_data(
+        reinterpret_cast<const char*>(rawData.data()), rawData.size(), options, &tree);
+    resvg_options_destroy(options);
+    if (parseResult != RESVG_OK || !tree) return false;
+
+    resvg_size docSize = resvg_get_image_size(tree);
+    if (docSize.width <= 0.0f || docSize.height <= 0.0f) {
+        resvg_tree_destroy(tree);
+        return false;
+    }
+
+    // Upscale small documents so fit-to-window and moderate zoom stay crisp,
+    // render large ones at native size, and cap the raster to bound memory.
+    constexpr float TARGET_DIM = 4096.0f;
+    constexpr float MAX_DIM = 8192.0f;
+    float docMaxDim = std::max(docSize.width, docSize.height);
+    float scale = std::max(1.0f, TARGET_DIM / docMaxDim);
+    scale = std::min(scale, MAX_DIM / docMaxDim);
+
+    UINT pixelWidth = static_cast<UINT>(std::lround(docSize.width * scale));
+    UINT pixelHeight = static_cast<UINT>(std::lround(docSize.height * scale));
+    if (pixelWidth == 0 || pixelHeight == 0) {
+        resvg_tree_destroy(tree);
+        return false;
+    }
+
+    std::vector<BYTE> pixels;
+    try {
+        pixels.resize(static_cast<size_t>(pixelWidth) * pixelHeight * 4);
+    }
+    catch (const std::bad_alloc&) {
+        resvg_tree_destroy(tree);
+        return false;
+    }
+
+    resvg_transform transform = { scale, 0.0f, 0.0f, scale, 0.0f, 0.0f };
+    resvg_render(tree, transform, pixelWidth, pixelHeight, reinterpret_cast<char*>(pixels.data()));
+    resvg_tree_destroy(tree);
+
+    // resvg outputs premultiplied RGBA; WIC/D2D expect premultiplied BGRA.
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        std::swap(pixels[i], pixels[i + 2]);
+    }
+
+    ComPtr<IWICImagingFactory> factory;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) {
+        return false;
+    }
+
+    ComPtr<IWICBitmap> bitmap;
+    if (FAILED(factory->CreateBitmapFromMemory(
+        pixelWidth, pixelHeight, GUID_WICPixelFormat32bppPBGRA,
+        pixelWidth * 4, static_cast<UINT>(pixels.size()), pixels.data(), &bitmap))) {
+        return false;
+    }
+
+    ComPtr<IWICFormatConverter> converter = ConvertToFormat(factory.Get(), bitmap.Get());
+    if (!converter) return false;
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_ctx.wicMutex);
+        m_ctx.stagedStaticConverter = converter;
+        m_ctx.stagedRawFileData = std::move(rawData);
+        m_ctx.stagedWidth = pixelWidth;
+        m_ctx.stagedHeight = pixelHeight;
+        m_ctx.originalContainerFormat = GUID_NULL;
+        m_ctx.stagedOrientation = 1;
+        m_ctx.isDownscaled = false;
+        m_ctx.downscaleRatio = 1.0f;
+    }
+    PostMessage(m_ctx.hWnd, WM_APP_IMAGE_READY, 1, (LPARAM)seqId);
+    return true;
 }
 
 
@@ -138,6 +225,11 @@ void ViewerApp::LoadImageFromFile(const std::wstring& filePath, bool startAtEnd)
 
         const wchar_t* ext = PathFindExtensionW(filePath.c_str());
         if (ext && _wcsicmp(ext, L".svg") == 0) {
+            // Prefer resvg (full SVG support: CSS classes, text, filters).
+            if (LoadSvgWithResvg(rawData, mySeqId)) {
+                return;
+            }
+            // Fallback: hand the raw data to the Direct2D SVG renderer.
             std::lock_guard<std::recursive_mutex> lock(m_ctx.wicMutex);
             m_ctx.stagedSvgData = std::move(rawData);
             PostMessage(m_ctx.hWnd, WM_APP_IMAGE_READY, 1, (LPARAM)mySeqId);

@@ -460,4 +460,5 @@ private:
     // IO Helpers
     bool IsSequenceValid(int seqId);
     HRESULT CreateDecoderFromStream_FullFileRead(IWICImagingFactory* pFactory, const wchar_t* filePath, IWICBitmapDecoder** ppDecoder, int seqId);
+    bool LoadSvgWithResvg(FastByteBuffer& rawData, int seqId);
 };

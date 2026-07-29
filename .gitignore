@@ -1,5 +1,11 @@
 # ===========================
-# Visual Studio Specific 
+# Fork: resvg integration
+# ===========================
+# Full resvg source clone (rebuild scratch area, huge target/ dir)
+third_party/resvg-src/
+
+# ===========================
+# Visual Studio Specific
 # ===========================
 .vs/
 Debug/
@@ -68,3 +74,8 @@ windowsstore/
 # OS Generated files 
 .DS_Store
 Thumbs.db
+# Fork: the prebuilt resvg static library must be committed despite the x64/
+# and *.lib rules above so the project builds without a Rust toolchain.
+# Both the directory and the file need re-including (last match wins).
+!third_party/resvg/x64/
+!third_party/resvg/x64/resvg.lib
