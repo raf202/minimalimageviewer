@@ -76,5 +76,13 @@
 #define IDC_CHECK_SHOW_OSD          2030
 #define IDC_CHECK_ASK_DELETE        2031
 #define IDC_CHECK_PRESERVE_ZOOM     2032
+#define IDC_RADIO_ZOOM_AUTO         2033
+#define IDC_STATIC_AUTOZOOM_GROUP   2034
+#define IDC_SLIDER_AUTO_MAXW        2035
+#define IDC_SLIDER_AUTO_MAXH        2036
+#define IDC_STATIC_AUTO_MAXW_VAL    2037
+#define IDC_STATIC_AUTO_MAXH_VAL    2038
+#define IDC_EDIT_AUTO_MINW          2039
+#define IDC_EDIT_AUTO_MINH          2040
 
 #define IDC_STATIC                  -1

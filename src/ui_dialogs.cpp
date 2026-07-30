@@ -47,8 +47,26 @@ INT_PTR CALLBACK ViewerApp::PreferencesDialogProc(HWND hDlg, UINT message, WPARA
         CheckDlgButton(hDlg, IDC_CHECK_ASK_DELETE, ctx.askToDelete ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hDlg, IDC_CHECK_PRESERVE_ZOOM, ctx.preserveZoomOnResize ? BST_CHECKED : BST_UNCHECKED);
 
-        CheckRadioButton(hDlg, IDC_RADIO_ZOOM_FIT, IDC_RADIO_ZOOM_ACTUAL,
-            ctx.defaultZoomMode == DefaultZoomMode::Fit ? IDC_RADIO_ZOOM_FIT : IDC_RADIO_ZOOM_ACTUAL);
+        // Check individually: IDC_RADIO_ZOOM_AUTO is not contiguous with the other
+        // two IDs, so a CheckRadioButton range would sweep unrelated controls
+        CheckDlgButton(hDlg, IDC_RADIO_ZOOM_FIT, ctx.defaultZoomMode == DefaultZoomMode::Fit ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hDlg, IDC_RADIO_ZOOM_ACTUAL, ctx.defaultZoomMode == DefaultZoomMode::Actual ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hDlg, IDC_RADIO_ZOOM_AUTO, ctx.defaultZoomMode == DefaultZoomMode::Auto ? BST_CHECKED : BST_UNCHECKED);
+
+        SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXW, TBM_SETRANGE, TRUE, MAKELPARAM(10, 100));
+        SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXW, TBM_SETPOS, TRUE, ctx.autoMaxWidthPercent);
+        SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXH, TBM_SETRANGE, TRUE, MAKELPARAM(10, 100));
+        SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXH, TBM_SETPOS, TRUE, ctx.autoMaxHeightPercent);
+        SetDlgItemInt(hDlg, IDC_EDIT_AUTO_MINW, ctx.autoMinWidth, FALSE);
+        SetDlgItemInt(hDlg, IDC_EDIT_AUTO_MINH, ctx.autoMinHeight, FALSE);
+        SendMessage(hDlg, WM_HSCROLL, 0, 0); // sync the percent labels
+        return (INT_PTR)TRUE;
+    }
+    case WM_HSCROLL: {
+        int maxW = static_cast<int>(SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXW, TBM_GETPOS, 0, 0));
+        int maxH = static_cast<int>(SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXH, TBM_GETPOS, 0, 0));
+        SetDlgItemTextW(hDlg, IDC_STATIC_AUTO_MAXW_VAL, (std::to_wstring(maxW) + L"%").c_str());
+        SetDlgItemTextW(hDlg, IDC_STATIC_AUTO_MAXH_VAL, (std::to_wstring(maxH) + L"%").c_str());
         return (INT_PTR)TRUE;
     }
     case WM_COMMAND:
@@ -92,6 +110,17 @@ INT_PTR CALLBACK ViewerApp::PreferencesDialogProc(HWND hDlg, UINT message, WPARA
             else if (IsDlgButtonChecked(hDlg, IDC_RADIO_ZOOM_ACTUAL)) {
                 ctx.defaultZoomMode = DefaultZoomMode::Actual;
             }
+            else if (IsDlgButtonChecked(hDlg, IDC_RADIO_ZOOM_AUTO)) {
+                ctx.defaultZoomMode = DefaultZoomMode::Auto;
+            }
+
+            ctx.autoMaxWidthPercent = static_cast<int>(SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXW, TBM_GETPOS, 0, 0));
+            ctx.autoMaxHeightPercent = static_cast<int>(SendDlgItemMessage(hDlg, IDC_SLIDER_AUTO_MAXH, TBM_GETPOS, 0, 0));
+            BOOL minOk = FALSE;
+            int minVal = static_cast<int>(GetDlgItemInt(hDlg, IDC_EDIT_AUTO_MINW, &minOk, FALSE));
+            if (minOk) ctx.autoMinWidth = std::max(0, std::min(2000, minVal));
+            minVal = static_cast<int>(GetDlgItemInt(hDlg, IDC_EDIT_AUTO_MINH, &minOk, FALSE));
+            if (minOk) ctx.autoMinHeight = std::max(0, std::min(2000, minVal));
 
             // Immediate update from fullscreen setting
             if (!ctx.startFullScreen && ctx.isFullScreen) {
@@ -110,6 +139,11 @@ INT_PTR CALLBACK ViewerApp::PreferencesDialogProc(HWND hDlg, UINT message, WPARA
 
             pApp->UpdateTitleBarTheme(ctx.hWnd, ctx.bgColor);
             InvalidateRect(ctx.hWnd, NULL, FALSE);
+
+            // Re-fit the current image right away so limit changes are visible
+            if (ctx.defaultZoomMode == DefaultZoomMode::Auto && !ctx.loadingFilePath.empty() && !ctx.isLoading) {
+                pApp->FitWindowToImage();
+            }
 
             // Auto-save 
             if (!ctx.isFullScreen) {
@@ -140,6 +174,9 @@ INT_PTR CALLBACK ViewerApp::PreferencesDialogProc(HWND hDlg, UINT message, WPARA
 }
 
 void ViewerApp::OpenPreferencesDialog() {
+    // Trackbar (slider) class lives in comctl32 and needs explicit registration
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_BAR_CLASSES };
+    InitCommonControlsEx(&icc);
     DialogBoxParam(m_ctx.hInst, MAKEINTRESOURCE(IDD_PREFERENCES_DIALOG), m_ctx.hWnd, PreferencesDialogProc, (LPARAM)this);
 }
 

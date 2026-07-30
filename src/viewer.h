@@ -88,7 +88,8 @@ enum class SortCriteria {
 
 enum class DefaultZoomMode {
     Fit = 0,
-    Actual = 1
+    Actual = 1,
+    Auto = 2   // Window resizes to image: native size if it fits on screen, scaled down otherwise
 };
 
 enum ActionID {
@@ -212,6 +213,13 @@ struct AppContext {
     SortCriteria currentSortCriteria = SortCriteria::ByName;
     bool isSortAscending = true;
     DefaultZoomMode defaultZoomMode = DefaultZoomMode::Fit;
+
+    // Auto zoom mode window limits: max as % of monitor work area, min in
+    // logical pixels (scaled by DPI). Tunable via the ini, no UI on purpose.
+    int autoMaxWidthPercent = 60;
+    int autoMaxHeightPercent = 70;
+    int autoMinWidth = 320;
+    int autoMinHeight = 240;
 
     wil::unique_haccel hAccelTable;
 
@@ -390,7 +398,8 @@ public:
     void Render();
     void CreateDeviceResources();
     void DiscardDeviceResources();
-    void FitImageToWindow();
+    void FitImageToWindow(bool limitToNativeSize = false);
+    void FitWindowToImage();
     void ZoomImage(float factor, POINT pt);
     void RotateImage(bool clockwise);
     void FlipImage();

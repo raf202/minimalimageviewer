@@ -426,7 +426,7 @@ void ViewerApp::Render() {
                         // Natively initialize virtualized image source on demand
                         if (!m_ctx.highResImageSource) {
                             ComPtr<IWICBitmapDecoder> decoder;
-                            if (SUCCEEDED(m_ctx.wicFactory->CreateDecoderFromStream(m_ctx.wicStream.Get(), NULL, WICDecodeMetadataCacheOnLoad, &decoder))) {
+                            if (SUCCEEDED(m_ctx.wicFactory->CreateDecoderFromStream(m_ctx.wicStream.Get(), NULL, WICDecodeMetadataCacheOnDemand, &decoder))) {
                                 ComPtr<IWICBitmapFrameDecode> frame;
                                 if (SUCCEEDED(decoder->GetFrame(0, &frame))) {
                                     ComPtr<IWICFormatConverter> converter;
@@ -600,7 +600,7 @@ void ViewerApp::Render() {
     }
 }
 
-void ViewerApp::FitImageToWindow() {
+void ViewerApp::FitImageToWindow(bool limitToNativeSize) {
     UINT imgWidth, imgHeight;
     if (!GetCurrentImageSize(&imgWidth, &imgHeight)) return;
 
@@ -619,6 +619,84 @@ void ViewerApp::FitImageToWindow() {
 
     if (imageWidth <= 0 || imageHeight <= 0) return;
     m_ctx.zoomFactor = std::min(clientWidth / imageWidth, clientHeight / imageHeight);
+    if (limitToNativeSize && m_ctx.zoomFactor > 1.0f) {
+        m_ctx.zoomFactor = 1.0f;
+    }
+    m_ctx.offsetX = 0.0f;
+    m_ctx.offsetY = 0.0f;
+    InvalidateRect(m_ctx.hWnd, nullptr, FALSE);
+}
+
+// Auto zoom mode: size the window to the image instead of the image to the window.
+// Small images open at native size; large images get a window capped to the monitor
+// work area with the image scaled down to fit. Never upscales, never crops.
+void ViewerApp::FitWindowToImage() {
+    UINT imgWidth, imgHeight;
+    if (!GetCurrentImageSize(&imgWidth, &imgHeight)) return;
+
+    // Fixed-frame states keep their window; just fit without enlarging past 100%
+    if (m_ctx.isFullScreen || IsZoomed(m_ctx.hWnd) || IsIconic(m_ctx.hWnd)) {
+        FitImageToWindow(true);
+        return;
+    }
+
+    float imageWidth = static_cast<float>(imgWidth);
+    float imageHeight = static_cast<float>(imgHeight);
+    if (m_ctx.rotationAngle == 90 || m_ctx.rotationAngle == 270) {
+        std::swap(imageWidth, imageHeight);
+    }
+    if (imageWidth <= 0 || imageHeight <= 0) return;
+
+    HMONITOR hMonitor = MonitorFromWindow(m_ctx.hWnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    if (!GetMonitorInfo(hMonitor, &mi)) return;
+
+    // Non-client space (borders + title bar) the frame adds around the client area
+    RECT windowRect, clientRect;
+    GetWindowRect(m_ctx.hWnd, &windowRect);
+    GetClientRect(m_ctx.hWnd, &clientRect);
+    int frameWidth = (windowRect.right - windowRect.left) - (clientRect.right - clientRect.left);
+    int frameHeight = (windowRect.bottom - windowRect.top) - (clientRect.bottom - clientRect.top);
+
+    float maxClientWidth = (mi.rcWork.right - mi.rcWork.left) * (m_ctx.autoMaxWidthPercent / 100.0f) - frameWidth;
+    float maxClientHeight = (mi.rcWork.bottom - mi.rcWork.top) * (m_ctx.autoMaxHeightPercent / 100.0f) - frameHeight;
+    if (maxClientWidth <= 0.0f || maxClientHeight <= 0.0f) return;
+
+    // Native size when it fits, otherwise scale down to the cap
+    float zoom = std::min(1.0f, std::min(maxClientWidth / imageWidth, maxClientHeight / imageHeight));
+    int targetClientWidth = static_cast<int>(std::lround(imageWidth * zoom));
+    int targetClientHeight = static_cast<int>(std::lround(imageHeight * zoom));
+
+    // Floor for tiny images: the window stays at a usable size and the image
+    // sits centered at 100% instead of the window shrink-wrapping it
+    float dpiScale = GetDpiForWindow(m_ctx.hWnd) / 96.0f;
+    int minClientWidth = std::min(static_cast<int>(std::lround(m_ctx.autoMinWidth * dpiScale)), static_cast<int>(maxClientWidth));
+    int minClientHeight = std::min(static_cast<int>(std::lround(m_ctx.autoMinHeight * dpiScale)), static_cast<int>(maxClientHeight));
+    targetClientWidth = std::max(targetClientWidth, minClientWidth);
+    targetClientHeight = std::max(targetClientHeight, minClientHeight);
+
+    int newWidth = targetClientWidth + frameWidth;
+    int newHeight = targetClientHeight + frameHeight;
+
+    // Re-center on the window's previous position, clamped inside the work area
+    int x = (windowRect.left + windowRect.right - newWidth) / 2;
+    int y = (windowRect.top + windowRect.bottom - newHeight) / 2;
+    x = std::max(static_cast<int>(mi.rcWork.left), std::min(x, static_cast<int>(mi.rcWork.right) - newWidth));
+    y = std::max(static_cast<int>(mi.rcWork.top), std::min(y, static_cast<int>(mi.rcWork.bottom) - newHeight));
+
+    SetWindowPos(m_ctx.hWnd, nullptr, x, y, newWidth, newHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+
+    // Windows may enforce a minimum window size (tiny images), so compute the final
+    // zoom from the client area we actually got, still capped at native size
+    GetClientRect(m_ctx.hWnd, &clientRect);
+    float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
+    float clientHeight = static_cast<float>(clientRect.bottom - clientRect.top);
+    if (clientWidth > 0.0f && clientHeight > 0.0f) {
+        m_ctx.zoomFactor = std::min(1.0f, std::min(clientWidth / imageWidth, clientHeight / imageHeight));
+    }
+    else {
+        m_ctx.zoomFactor = zoom;
+    }
     m_ctx.offsetX = 0.0f;
     m_ctx.offsetY = 0.0f;
     InvalidateRect(m_ctx.hWnd, nullptr, FALSE);

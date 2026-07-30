@@ -678,7 +678,8 @@ LRESULT ViewerApp::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
         if (wParam != SIZE_MINIMIZED) {
             if (!m_ctx.isLoading) {
                 if (!m_ctx.preserveZoomOnResize) {
-                    FitImageToWindow();
+                    // Auto mode never enlarges an image past its native size
+                    FitImageToWindow(m_ctx.defaultZoomMode == DefaultZoomMode::Auto);
                 }
                 InvalidateRect(hWnd, nullptr, FALSE);
             }

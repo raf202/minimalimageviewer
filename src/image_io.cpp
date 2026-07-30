@@ -53,7 +53,7 @@ HRESULT ViewerApp::CreateDecoderFromStream_FullFileRead(
         filePath,
         NULL,
         GENERIC_READ,
-        WICDecodeMetadataCacheOnLoad,
+        WICDecodeMetadataCacheOnDemand,
         ppDecoder
     );
 }
@@ -640,7 +640,9 @@ void ViewerApp::LoadImageFromFile(const std::wstring& filePath, bool startAtEnd)
         stream->InitializeFromMemory(rawData.data(), static_cast<DWORD>(rawData.size()));
 
         ComPtr<IWICBitmapDecoder> decoder;
-        hr = localFactory->CreateDecoderFromStream(stream.Get(), NULL, WICDecodeMetadataCacheOnLoad, &decoder);
+        // OnDemand (not OnLoad): eager metadata parsing rejects files with slightly
+        // malformed EXIF even though the pixel data is perfectly decodable.
+        hr = localFactory->CreateDecoderFromStream(stream.Get(), NULL, WICDecodeMetadataCacheOnDemand, &decoder);
 
         if (!IsSequenceValid(mySeqId)) {
             return;
@@ -973,7 +975,7 @@ void ViewerApp::OnImageReady(bool success, int seqId) {
             ComPtr<IWICStream> stream;
             if (SUCCEEDED(m_ctx.wicFactory->CreateStream(&stream)) &&
                 SUCCEEDED(stream->InitializeFromMemory(m_ctx.rawFileData.data(), static_cast<DWORD>(m_ctx.rawFileData.size())))) {
-                m_ctx.wicFactory->CreateDecoderFromStream(stream.Get(), NULL, WICDecodeMetadataCacheOnLoad, &m_ctx.animationDecoder);
+                m_ctx.wicFactory->CreateDecoderFromStream(stream.Get(), NULL, WICDecodeMetadataCacheOnDemand, &m_ctx.animationDecoder);
 
                 // Keep  stream alive in the context
                 m_ctx.wicStream = stream;
@@ -1033,6 +1035,9 @@ void ViewerApp::OnImageReady(bool success, int seqId) {
         }
         else if (m_ctx.defaultZoomMode == DefaultZoomMode::Actual) {
             SetActualSize();
+        }
+        else if (m_ctx.defaultZoomMode == DefaultZoomMode::Auto) {
+            FitWindowToImage();
         }
         else {
             FitImageToWindow();

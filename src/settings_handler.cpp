@@ -22,7 +22,16 @@ void ViewerApp::ReadSettings(const std::wstring& path, WINDOWPLACEMENT& wp, bool
     m_ctx.bgColor = static_cast<BackgroundColor>((bgChoice < 0 || bgChoice > 3) ? 0 : bgChoice);
 
     int zoomChoice = getInt(L"Settings", L"DefaultZoomMode", 0);
-    m_ctx.defaultZoomMode = static_cast<DefaultZoomMode>((zoomChoice < 0 || zoomChoice > 1) ? 0 : zoomChoice);
+    m_ctx.defaultZoomMode = static_cast<DefaultZoomMode>((zoomChoice < 0 || zoomChoice > 2) ? 0 : zoomChoice);
+
+    int maxW = getInt(L"Settings", L"AutoZoomMaxWidthPercent", 60);
+    m_ctx.autoMaxWidthPercent = (maxW < 10 || maxW > 100) ? 60 : maxW;
+    int maxH = getInt(L"Settings", L"AutoZoomMaxHeightPercent", 70);
+    m_ctx.autoMaxHeightPercent = (maxH < 10 || maxH > 100) ? 70 : maxH;
+    int minW = getInt(L"Settings", L"AutoZoomMinWidth", 320);
+    m_ctx.autoMinWidth = (minW < 0 || minW > 2000) ? 320 : minW;
+    int minH = getInt(L"Settings", L"AutoZoomMinHeight", 240);
+    m_ctx.autoMinHeight = (minH < 0 || minH > 2000) ? 240 : minH;
 
     int sortChoice = getInt(L"Settings", L"SortCriteria", 0);
     m_ctx.currentSortCriteria = static_cast<SortCriteria>((sortChoice < 0 || sortChoice > 2) ? 0 : sortChoice);
@@ -75,6 +84,10 @@ void ViewerApp::WriteSettings(const std::wstring& path, const WINDOWPLACEMENT& w
     writeInt(L"Settings", L"SlideshowInterval", m_ctx.slideshowIntervalSeconds);
     writeInt(L"Settings", L"BackgroundColor", static_cast<int>(m_ctx.bgColor));
     writeInt(L"Settings", L"DefaultZoomMode", static_cast<int>(m_ctx.defaultZoomMode));
+    writeInt(L"Settings", L"AutoZoomMaxWidthPercent", m_ctx.autoMaxWidthPercent);
+    writeInt(L"Settings", L"AutoZoomMaxHeightPercent", m_ctx.autoMaxHeightPercent);
+    writeInt(L"Settings", L"AutoZoomMinWidth", m_ctx.autoMinWidth);
+    writeInt(L"Settings", L"AutoZoomMinHeight", m_ctx.autoMinHeight);
     writeInt(L"Settings", L"SortCriteria", static_cast<int>(m_ctx.currentSortCriteria));
     writeInt(L"Settings", L"SortAscending", m_ctx.isSortAscending ? 1 : 0);
 
